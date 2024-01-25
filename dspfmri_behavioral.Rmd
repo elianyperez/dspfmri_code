@@ -1,0 +1,119 @@
+---
+title: "Moore_behavioral"
+author: "Eliany Perez"
+date: "7/26/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#load packages
+library(here)
+library(jmv)
+library(ggplot2)
+library(Hmisc)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(psych)
+library(dplyr)
+library(formattable)
+
+here()
+
+
+# Load data (csv's); store all files in list; combine csv's into one dataset.
+all_YA <- list.files(path = here("..","data","YA"),
+                       pattern = "*.csv", 
+                       full.names = TRUE) %>% 
+            lapply(read.csv) %>%                                                        
+            bind_rows 
+
+all_OA <- list.files(path = here("..","data","OA"),
+                       pattern = "*.csv", 
+                       full.names = TRUE) %>% 
+            lapply(read.csv) %>%                                                        
+            bind_rows 
+
+
+
+
+
+#save raw data file
+write.csv(all_YA, here("..","data","YA_combined.csv"))
+write.csv(all_OA, here("..","data","OA_combined.csv"))
+write.csv(all, here("..","data","all.csv"))
+
+```
+
+
+```{r}
+all_data<-read.csv(here("..","data","all.csv"))
+
+
+
+all_data$age <- factor(all_data$age,
+                 levels =c(1,2),
+                 labels = c("YA","OA"))
+
+
+tiff(here("..","data","fig1.tiff"), units="in", width=6, height=5, res=300)
+
+ggplot(all_data, aes(x= Status,  group=age)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent success and failures", fill="Age") +
+    facet_grid(~age) +
+    scale_y_continuous(labels = scales::percent)+
+  theme(legend.position="none")
+
+dev.off()
+
+
+```
+
+```{r}
+
+strategies<-read.csv(here("..","data","strategies", "strategies.csv"))
+
+
+
+strategies_long<-strategies %>% pivot_longer(cols=c('Rev', 'Rte', 'Sur', 'Top'),
+                    names_to='strategy',
+                    values_to='count')
+
+library(dplyr)
+strategy<-strategies_long %>%
+    group_by(strategy, age) %>% 
+    summarise_each(funs(sum))
+
+strategy$age <- factor(strategy$age,
+                 levels =c(1,2),
+                 labels = c("YA","OA"))
+
+
+```
+
+
+
+```{r - strategy percentages by age}
+
+strategy_table<-read.csv(here("..","data","strategy_table.csv"))
+
+tiff(here("..","data","fig2.tiff"), units="in", width=6, height=4, res=300)
+
+ggplot(data=strategy_table, aes(x=strategy,y=prop, fill=as.factor(age))) +
+geom_bar(stat="identity", position=position_dodge())+
+  labs(y = "Strategy counts", fill="Age group") +
+    scale_y_continuous(labels = scales::percent)+
+  theme_minimal()
+
+dev.off()
+
+
+```
+

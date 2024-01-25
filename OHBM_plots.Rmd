@@ -1,0 +1,700 @@
+---
+title: "OHBM plots"
+author: "Eliany Perez"
+date: "7/7/2023"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(here)
+library(jmv)
+library(ggplot2)
+library(Hmisc)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(psych)
+library(corrplot)
+library(dplyr)
+library(plyr)
+library(sdamr)
+library(scales)
+library(RColorBrewer)
+library(data.table)
+
+
+here::here()
+```
+
+```{r}
+DSP_fmri <- read.csv(here::here("..","data", "dspfmri_data_in_standard.csv"))
+
+#load data
+DSP_frechet <- read.csv(here::here("..","data", "frechet_by_trial.csv"))
+
+DSP_frechet <- DSP_frechet[c("subject","Sur", "Rte","Rev")] 
+
+#Get row-wise minimum
+min_val <- do.call(pmin, DSP_frechet[c(2:4)])
+
+#Check if there::here are more than one occurrence of minimum value 
+DSP_frechet$flag <- rowSums(DSP_frechet == min_val) > 1
+
+#delete all rows where::here the flag is True
+DSP_frechet <- DSP_frechet[DSP_frechet$flag != TRUE ,]
+
+
+#choose the minimum value and identify the corresponding strategy 
+DSP_frechet<-DSP_frechet %>% 
+  rownames_to_column('min_strategy') %>%  # creates an ID number
+  gather(strategy, cnt, Sur:Rev) %>% 
+  group_by(min_strategy) %>% 
+  slice(which.min(cnt))
+
+
+#choose just the strategy and subject columns to do a count
+DSP_frechet <- DSP_frechet[c("subject", "strategy")] 
+
+#count occurrences 
+setDT(DSP_frechet) 
+DSP_frechet<-dcast(DSP_frechet, subject ~ strategy, fun.aggregate = length)
+
+DSP_frechet$Place_response_index<- (DSP_frechet$Sur)/(DSP_frechet$Sur + DSP_frechet$Rte) 
+DSP_frechet$Place_response_index_plus<- (DSP_frechet$Sur)/(DSP_frechet$Sur + DSP_frechet$Rte + DSP_frechet$Rte) 
+
+DSP_frechet<-DSP_frechet %>% 
+  dplyr::rename(
+    ID = subject,
+    )
+
+DSP_fmri$hipp_caud<-(DSP_fmri$hipp - DSP_fmri$caud)/(DSP_fmri$hipp + DSP_fmri$caud)
+
+DSP<-merge(DSP_fmri,DSP_frechet, by.x="ID")
+
+```
+
+```{r}
+success <- read.csv(here::here("..","data","final_Data","success_data.csv"))
+distance <- read.csv(here::here( "..","data","final_Data","combined_summary_dfs.csv"))
+distance  <- distance [c("ParticipantNo", "TrialNo","Distance")] 
+distance<-na.omit(distance)
+
+#mean distance by participant
+distance<-aggregate(distance$Distance, list(distance$ParticipantNo), FUN=mean) 
+distance<-distance %>% 
+  dplyr::rename(
+    ID = Group.1,
+    distance = x,
+    )
+distance<-na.omit(distance)
+#merge
+merged<-merge(DSP,success, by.x="ID")
+merged<-merge(merged,distance, by.x="ID")
+#merged<-na.omit(merged)
+#write.csv(merged,(here::here("..", "data","dspfmri_tmp_allData.csv")), row.names = FALSE)
+```
+
+Plot Success rate, distance, and place response index by age and Gender
+
+```{r create age and Gender columns}
+merged<-merged %>%
+      mutate( Gender= case_when(
+        startsWith(as.character(ID), "11") ~ "Male",
+        startsWith(as.character(ID), "12") ~ "Female",
+        startsWith(as.character(ID), "21") ~ "Male",
+        startsWith(as.character(ID), "22") ~ "Female",
+                 TRUE ~ "number"))
+
+merged<-merged %>%
+      mutate( Age= case_when(
+        startsWith(as.character(ID), "1") ~ "YA",
+        startsWith(as.character(ID), "2") ~ "OA",
+                 TRUE ~ "number"))
+
+```
+
+
+```{r PRI by age and Gender}
+tiff(here::here("..","figures","PRI_by_age_Gender.tiff"), units="in", width=12, height=10, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+p<-ggplot(merged) +
+  aes(x = Age, 
+      y = Place_response_index_plus, 
+      fill = Gender) +
+  ylim(NA, 1.2)+
+  #geom_flat_violin(position = position_nudge(x = .3), 
+  #                 alpha = .5) +
+  geom_point(aes(group = Gender, color =Gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               #outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2) +
+  scale_color_manual(values = JACE_COLOR_2)  +
+  labs(x = "Age",
+       y = "Navigation strategy",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+p + stat_compare_means(comparisons = my_comparisons,label.y = 1.1,size = 12)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 1,size = 12)  +
+  theme_classic()+
+  theme_classic(base_size = 40)+
+  theme(legend.position = 'top', legend.direction = "horizontal")
+ 
+#p.signif, ..p.signif.., p.format, ..p.format.., p, ..p..
+dev.off()
+  
+```
+
+
+
+```{r success by age and Gender}
+tiff(here::here("..","figures","success_by_age_Gender.tiff"), units="in", width=12, height=10, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+h<-ggplot(merged) +
+  aes(x = Age, 
+      y = success_prop, 
+      fill = Gender) +
+  ylim(NA, 1.3)+
+ # geom_flat_violin(position = position_nudge(x = .3), 
+  #                 alpha = .5) +
+  geom_point(aes(color =Gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2) +
+  scale_color_manual(values = JACE_COLOR_2)  +
+  labs(x = "Age",
+       y = "Navigation ability",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+h + stat_compare_means(comparisons = my_comparisons,label.y = 1.2, size= 12)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 1.1, size = 12)  +
+  theme_classic(base_size = 40)+
+  theme(legend.position = 'top', legend.direction = "horizontal")
+
+
+dev.off()
+  
+```
+
+
+```{r distance by age and Gender}
+#tiff(here::here("..","figures","distance_by_age_Gender.tiff"), units="in", width=7, height=4, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+i<-ggplot(merged) +
+  aes(x = Age, 
+      y = distance, 
+      fill = Gender) +
+  geom_flat_violin(position = position_nudge(x = .3), 
+                   alpha = .5) +
+  geom_point(aes(color =Gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2) +
+  scale_color_manual(values = JACE_COLOR_2)  +
+  labs(x = "Age",
+       y = "Average distance traveled",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+i + stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 650)  +
+  theme_classic(base_size = 15)+
+   theme(legend.position = 'top', legend.direction = "horizontal")
+
+
+#dev.off()
+  
+```
+
+```{r correlation between pri and the other two measures by age}
+ggscatter(merged, x = "Place_response_index_plus", y = c("distance", "Success"), size = 0.3,
+          combine = TRUE, ylab = "",
+          color = "Age", palette = "jco",
+          add = "reg.line", conf.int = TRUE) +
+  stat_cor(aes(color = Age), method = "spearman")
+```
+
+```{r}
+
+mod <- lm(Place_response_index_plus ~ hipp_caud, data=merged)
+cooksd <- cooks.distance(mod)
+
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+influential <- as.numeric(names(cooksd)[(cooksd > 4*mean(cooksd, na.rm=T))])  # influential row numbers
+head(merged[influential, ])
+
+#remove outliers
+merged<-merged[-c(23,8,6),]
+#remove points low in the graph for better visualization. These points don't change the correlation
+```
+
+```{r}
+tiff(here::here("..","figures","hippcaud_ratio_by_age_2.tiff"), units="in", width=16, height=10, res=400)
+
+g<- ggplot(merged,aes(Place_response_index_plus,hipp_caud)) +
+geom_point(aes(color = Age, shape = Age)) +
+geom_smooth(method = "lm",color = "black",size=1) +
+geom_smooth(method = "lm",aes(color = Age),size=1)+ 
+  labs(x = "Navigation strategy",
+       y = "hipppocampus - caudate Ratio") +
+theme_classic(base_size = 40)+
+  ylim(-.5, 1.5)
+
+
+g+ stat_cor(method = "pearson",aes(color = Age), label.x = .5, size= 12)+
+   stat_cor(method = "pearson",label.x = .5, label.y = 0.95, size= 12)+
+   scale_colour_manual(values = c("deepskyblue3","darkgoldenrod2")) +
+     theme(legend.position = 'top', legend.direction = "horizontal")
+
+dev.off()
+```
+
+```{r correlation for hipppocampus}
+
+mod <- lm(Place_response_index_plus ~ hipp, data=merged)
+cooksd <- cooks.distance(mod)
+
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+influential <- as.numeric(names(cooksd)[(cooksd > 4*mean(cooksd, na.rm=T))])  # influential row numbers
+head(merged[influential, ])
+
+#remove outliers
+merged<-merged[-c(11,5),]
+#remove points low in the graph for better visualization. These points don't change the correlation
+
+
+
+tiff(here::here("..","figures","hipp_by_age.tiff"), units="in", width=7, height=4, res=400)
+
+g<- ggplot(merged,aes(Place_response_index_plus,hippp)) +
+geom_point(aes(color = Age, shape = Age)) +
+geom_smooth(method = "lm",color = "black",size=1) +
+geom_smooth(method = "lm",aes(color = Age),size=1)+ 
+  labs(x = "PRI",
+       y = "hipppocampus activaion") +
+theme_classic()+
+  ylim(-.5, 1.5)
+
+
+g+ stat_cor(method = "pearson",aes(color = Age), label.x = .5)+
+   stat_cor(method = "pearson",label.x = .5, label.y = 1.18)+
+   scale_colour_manual(values = c("deepskyblue3","darkgoldenrod2")) 
+
+
+
+#dev.off()
+```
+
+
+```{r correlation for caudate}
+
+mod <- lm(Place_response_index_plus ~ caud, data=merged)
+cooksd <- cooks.distance(mod)
+
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+influential <- as.numeric(names(cooksd)[(cooksd > 4*mean(cooksd, na.rm=T))])  # influential row numbers
+head(merged[influential, ])
+
+#remove outliers
+merged<-merged[-c(39,34),]
+#remove points low in the graph for better visualization. These points don't change the correlation
+
+
+
+tiff(here::here("..","figures","caud_by_age.tiff"), units="in", width=7, height=4, res=400)
+
+g<- ggplot(merged,aes(Place_response_index_plus,caud)) +
+geom_point(aes(color = Age, shape = Age)) +
+geom_smooth(method = "lm",color = "black",size=1) +
+geom_smooth(method = "lm",aes(color = Age),size=1)+ 
+  labs(x = "PRI",
+       y = "caudate activaion") +
+theme_classic()+
+  ylim(-.5, 1.5)
+
+
+g+ stat_cor(method = "pearson",aes(color = Age), label.x = .5)+
+   stat_cor(method = "pearson",label.x = .5, label.y = 1.18)+
+   scale_colour_manual(values = c("deepskyblue3","darkgoldenrod2")) 
+
+
+
+dev.off()
+```
+
+
+```{r correlations with ROIS}
+
+merged_O<-merged[(merged$Age == "OA"), ]
+merged_O <- merged_O[c( "hipp", "caud", "hipp_caud", "Place_response_index_plus", "success_prop")] 
+merged_Y<-merged[(merged$Age == "YA"), ]
+merged_Y <- merged_Y[c( "hipp", "caud", "hipp_caud", "Place_response_index_plus", "success_prop")] 
+
+cor_merged_Y<-cor(merged_Y)  
+colnames(cor_merged_Y) <- c("hipp_YA", "caud_YA", "hipp_caud_YA", "PRI_YA", "success_YA")
+rownames(cor_merged_Y ) <- c("hipp_YA", "caud_YA", "hipp_caud_YA", "PRI_YA", "success_YA")
+
+corrplot(cor_merged_Y,
+         col=colorRampPalette(c("gold","white","steelblue"))(200),
+         type = "lower",
+         addCoef.col = "black",
+         number.cex = 1,
+         tl.cex = 1,
+         method = "square",
+         diag=FALSE
+         )
+
+
+cor_merged_O<-cor(merged_O) 
+colnames(cor_merged_O ) <- c("hipp_OA", "caud_OA", "hipp_caud_OA", "PRI_OA", "success_OA")
+rownames(cor_merged_O ) <- c("hipp_OA", "caud_OA", "hipp_caud_OA", "PRI_OA", "success_OA")
+
+corrplot(cor_merged_O,
+         col=colorRampPalette(c("gold","white","steelblue"))(200),
+         type = "lower",
+         addCoef.col = "black",
+         number.cex = 1,
+         tl.cex = 1,
+         method = "square",
+         diag=FALSE
+         )
+
+# create data frame with sd, se, and ci
+ggplot(merged, aes(x = Place_response_index_plus, y = success_prop)) +
+  #geom_line(aes(color=Age))+
+  geom_point(aes(color = Age),size=2.5)+
+  labs(title = "", x ="PRI" , y= "Success")
+```
+
+
+```{r}
+age <- read.csv(here::here("..", "data","age_dist.csv"))
+ls(age)
+age<-age %>%
+      mutate( Gender= case_when(
+        startsWith(as.character(ï..participant_id), "11") ~ "Male",
+        startsWith(as.character(ï..participant_id), "12") ~ "Female",
+        startsWith(as.character(ï..participant_id), "21") ~ "Male",
+        startsWith(as.character(ï..participant_id), "22") ~ "Female",
+                 TRUE ~ "number"))
+
+age<-age %>%
+      mutate( Age= case_when(
+        startsWith(as.character(ï..participant_id), "1") ~ "YA",
+        startsWith(as.character(ï..participant_id), "2") ~ "OA",
+                 TRUE ~ "number"))
+
+age<- na.omit (age)
+
+
+ggplot(age, aes(x = age,fill = Age)) + 
+  geom_histogram(colour = "black",
+                 bins = 10)+
+  theme_classic(base_size = 15)+
+   scale_fill_manual(values = c("lightyellow","lightblue"))
+```
+
+```{r age x hipppocampus}
+tiff(here::here("..","figures","hipp_by_age_Gender_inStandard.tiff"), units="in", width=12, height=10, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+hipp<-ggplot(merged) +
+  aes(x = Age, 
+      y = hipp, 
+      fill = Gender) +
+   ylim(NA, 2.4)+
+ # geom_flat_violin(position = position_nudge(x = .3), 
+  #                 alpha = .5) +
+  geom_point(aes(color =Gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2)+
+  scale_color_manual(values = JACE_COLOR_2)+
+  labs(x = "Age",
+       y = "Hipppocampus activation",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+hipp + stat_compare_means(comparisons = my_comparisons,label.y = 2.1, size= 10)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 1.9, size = 10)  +
+  theme_classic(base_size = 40)+
+  theme(legend.position = 'top', legend.direction = "horizontal")
+
+
+dev.off()
+```
+
+
+```{r}
+tiff(here::here("..","figures","caudate_by_age_gender_inStandard.tiff"), units="in", width=12, height=10, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+caud<-ggplot(merged) +
+  aes(x = Age, 
+      y = caud, 
+      fill = Gender) +
+     ylim(NA, 2.4)+
+  #geom_flat_violin(position = position_nudge(x = .3), 
+   #                alpha = .5) +
+  geom_point(aes(color =Gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2) +
+  scale_color_manual(values = JACE_COLOR_2)  +
+  labs(x = "Age",
+       y = "Caudate activation",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+caud + stat_compare_means(comparisons = my_comparisons,label.y = 2.1, size= 10)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 1.9, size = 10)  +
+  theme_classic(base_size = 40)+
+  theme(legend.position = 'top', legend.direction = "horizontal")
+
+
+dev.off()
+```
+
+```{r figures with all bevavioral participants accross studies}
+
+all_behavioral <- list.files(path = here::here( "..","data","all_behavioral"),
+                       pattern = "*data.csv", 
+                       full.names = TRUE) %>% 
+            lapply(read.csv) %>%                                                
+            bind_rows
+
+#choose only dsp1
+all_behavioral_dsp1 <-all_behavioral[all_behavioral$session == 1, ]  
+
+all_behavioral_dsp1$Gender[all_behavioral_dsp1$Gender == "M"] <- "Male"
+all_behavioral_dsp1$Gender[all_behavioral_dsp1$Gender == "F"] <- "Female"
+all_behavioral_dsp1$older_younger[all_behavioral_dsp1$older_younger == "Y"] <- "YA"
+all_behavioral_dsp1$older_younger[all_behavioral_dsp1$older_younger == "O"] <- "OA"
+
+write.csv(all_behavioral_dsp1, here::here(  "..","data","all_behavioral", "all_studies.csv"),
+            row.names = FALSE)
+
+```
+
+
+
+```{r PRI by older_younger and Gender}
+tiff(here::here("..","figures","all_studies_PRI_by_older_younger_Gender.tiff"), units="in", width=11, height=6, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+p<-ggplot(all_behavioral_dsp1) +
+  aes(x = older_younger, 
+      y = place_resp_index, 
+      fill = Gender) +
+  #geom_flat_violin(position = position_nudge(x = .3), 
+  #                 alpha = .5) +
+  geom_point(aes(color =Gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2) +
+  scale_color_manual(values = JACE_COLOR_2)  +
+  labs(x = "Age",
+       y = "PRI",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+p + stat_compare_means(comparisons = my_comparisons, label.y = 1,size = 6)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 1.2, size = 6)  +
+  theme_classic(base_size = 18)+
+   theme(legend.position = 'top', legend.direction = "horizontal")
+
+
+dev.off()
+  
+```
+
+
+```{r success by age and Gender}
+#tiff(here::here("..","figures","all_studies_success_by_age_Gender.tiff"), units="in", width=11, height=6, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+h<-ggplot(all_behavioral_dsp1) +
+  aes(x = older_younger, 
+      y = success, 
+      fill = gender)  +
+  #geom_flat_violin(position = position_nudge(x = .3), 
+   #                alpha = .5) +
+  geom_point(aes(color =gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2) +
+  scale_color_manual(values = JACE_COLOR_2)  +
+  labs(x = "Age",
+       y = "Navigation ability",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+                        
+h + stat_compare_means(comparisons = my_comparisons, size = 6)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 23, size = 6)  +
+  theme_classic(base_size = 18)
+  theme(legend.position = 'top', legend.direction = "horizontal")
+
+
+#dev.off()
+  
+  
+#PRI by success 
+tiff(here::here("..","figures","PRI_success.tiff"), units="in", width=9, height=8, res=400)
+ggplot(merged,aes(Place_response_index,success_prop)) +
+geom_point(aes(color = Age, shape = Gender)) +
+geom_smooth(method = "lm",aes(color = Age),size=1.3)+ 
+  labs(x = "PRI",
+       y = "success") +
+theme_classic(base_size = 15)
+dev.off()
+
+#hip_caud ration by success
+ggplot(merged,aes(hipp_caud,success_prop)) +
+geom_point(aes(color = Age, shape = Gender)) +
+geom_smooth(method = "lm",aes(color = Age),size=1.3)+ 
+  labs(x = "hip_caud ratio",
+       y = "success") +
+theme_classic(base_size = 15)
+
+
+  
+  
+```
+
+
+```{r distance by age and Gender}
+tiff(here::here("..","figures","all_studies_distance_by_age_Gender.tiff"), units="in", width=11, height=6, res=400)
+
+JACE_COLOR_2 = c("#FF5A5F", "#007A87")
+
+i<-ggplot(all_behavioral_dsp1) +
+  aes(x = older_younger, 
+      y = distance, 
+      fill = Gender) +
+  #geom_flat_violin(position = position_nudge(x = .3), 
+  #                 alpha = .5) +
+  geom_point(aes(color =Gender), 
+             position = position_jitterdodge(jitter.width = .1,dodge.width = 0.40),
+             size = 2,
+             alpha = 0.4,
+             show.legend = F) +
+  geom_boxplot(width = .4, 
+               outlier.shape = NA,
+               alpha = 0.5) +
+  scale_fill_manual(values = JACE_COLOR_2) +
+  scale_color_manual(values = JACE_COLOR_2)  +
+  labs(x = "Age",
+       y = "Average distance traveled",
+       fill = "Gender",
+       title = "") +
+  guides(fill = guide_legend(nrow=1,
+                             byrow=TRUE))
+
+my_comparisons <- list( c("OA", "YA") )
+i + stat_compare_means(comparisons = my_comparisons, size = 6)+ # Add pairwise comparisons p-value
+  stat_compare_means(label = "p.format",label.y = 680, size = 6)  +
+  theme_classic(base_size = 18)+
+   theme(legend.position = 'top', legend.direction = "horizontal")
+
+
+dev.off()
+  
+```
+
+```{r}
+# get count of the number of particiants by age and Gender
+count <- all_behavioral_dsp1 %>% group_by(older_younger,Gender) %>% 
+  dplyr::summarise(total_count=n(),.groups = 'drop') %>%
+  as.data.frame()
+count
+
+```
+
+```{r}
+age <- read.csv(here::here( "..","data","all_behavioral","all_studies_wage.csv"))
+age <- read.csv(here::here( "..","data","all_behavioral","attnbhv_demographics_age.csv"))
+descriptives<-merge(all, age, by.x="ParticipantNo")
+
+describe(age)
+```
+
+

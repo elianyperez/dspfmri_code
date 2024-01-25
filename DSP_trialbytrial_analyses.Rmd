@@ -1,0 +1,91 @@
+---
+title: "DSP_trialbytrial_analyses"
+author: "Eliany Perez"
+date: "3/2/2023"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(here)
+library(jmv)
+library(ggplot2)
+library(Hmisc)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(psych)
+library(corrplot)
+library(dplyr)
+library(plyr)
+library(sdamr)
+library(scales)
+library(RColorBrewer)
+
+
+here::here()
+```
+
+```{r}
+frechet <- read.csv(here::here( "..","data","frechet_by_trial.csv"))
+```
+
+```{r}
+frechet  <- frechet[c("subject","trial","Sur","Rte")] 
+
+frechet$subject <- factor(frechet$subject)
+library(data.table)
+long <- melt(setDT(frechet), id.vars = c("subject", "trial"), variable.name = "strategy")
+long <-na.omit(long)
+
+long<-long %>%
+      mutate( Age= case_when(
+        startsWith(as.character(subject), "1") ~ "YA",
+        startsWith(as.character(subject), "2") ~ "OA",
+                 TRUE ~ "number"))
+
+long_YA<-long[(long$Age == "YA"), ]
+long_OA<-long[(long$Age == "OA"), ]
+# Group by mean using R Base aggregate()
+frechet_means_YA <- aggregate(long_YA$value, by=list(long_YA$trial, long_YA$strategy), FUN=mean)
+frechet_means_OA <- aggregate(long_OA$value, by=list(long_OA$trial, long_OA$strategy), FUN=mean)
+
+#plot
+g<-frechet_means_YA %>% 
+  ggplot(aes(x = Group.1, y = x , group = Group.2, color = Group.2)) +
+  geom_point(aes(color = Group.2, shape = Group.2)) +
+  #geom_smooth(method = "lm",aes(color = Group.2),size=1) +
+  geom_line()+
+  labs(x = "Trial",
+       y = "Mean Frechet Distance",
+       title = "DSP younger adult strategies") +
+theme_classic()
+
+
+#correlation of strategy by trial
+g+ stat_cor(method = "pearson",aes(color = Group.2), label.x = 8)+
+   scale_colour_manual(values = c("deepskyblue","magenta3")) 
+
+
+h<-frechet_means_OA %>% 
+  ggplot(aes(x = Group.1, y = x , group = Group.2, color = Group.2)) +
+  geom_point(aes(color = Group.2, shape = Group.2)) +
+  #geom_smooth(method = "lm",aes(color = Group.2),size=1) +
+  geom_line()+
+  labs(x = "Trial",
+       y = "Mean Frechet Distance",
+       title = "DSP older adult strategies") +
+theme_classic()
+
+#correlation of strategy by trial
+h+ stat_cor(method = "pearson",aes(color = Group.2), label.x = 5)+
+   scale_colour_manual(values = c("deepskyblue","magenta3")) 
+
+
+```
+
+

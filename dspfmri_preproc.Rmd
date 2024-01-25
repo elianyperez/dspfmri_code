@@ -1,0 +1,180 @@
+---
+title: "dspfmri_pre-processing"
+author: "Eliany Perez"
+date: "12/28/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(here)
+library(data.table)
+here::here()
+```
+
+```{r Create place response index}
+#load data
+DSP <- read.csv(here::here("..","data", "frechet_by_trial.csv"))
+
+DSP <- DSP[c("subject","Sur", "Rte","Rev")] 
+
+#Get row-wise minimum
+min_val <- do.call(pmin, DSP[c(2:4)])
+
+#Check if there::here are more than one occurrence of minimum value 
+DSP$flag <- rowSums(DSP == min_val) > 1
+
+#delete all rows where::here the flag is True
+DSP <- DSP[DSP$flag != TRUE ,]
+
+
+#choose the minimum value and identify the corresponding strategy 
+DSP<-DSP %>% 
+  rownames_to_column('min_strategy') %>%  # creates an ID number
+  gather(strategy, cnt, Sur:Rev) %>% 
+  group_by(min_strategy) %>% 
+  slice(which.min(cnt))
+
+
+#choose just the strategy and subject columns to do a count
+DSP <- DSP[c("subject", "strategy")] 
+
+#count occurrences 
+setDT(DSP) 
+DSP<-dcast(DSP, subject ~ strategy, fun.aggregate = length)
+
+```
+
+```{r Create place response index}
+
+DSP$Place_response_index<- (DSP$Sur)/(DSP$Sur + DSP$Rte) 
+DSP$Place_response_index_plus<- (DSP$Sur)/(DSP$Sur + DSP$Rte + DSP$Rte) 
+#DSP[is.na(DSP)] <- 0
+#PRI = # of surveys Trials/ (#)
+
+DSP<-DSP %>% 
+  dplyr::rename(
+    ID = subject,
+    )
+write.csv(DSP, (here::here("..","data", "final_data", "dspfrmi_PRI.csv")), row.names = FALSE)
+
+```
+
+```{r ROI preprocessing}
+fmri_data <- read.csv(here::here("..","data","dspfmri_data_in_standard.csv"))
+
+
+
+#calculate Marchette et. al hip to caud ratio
+fmri_data$hipp_caud<- (fmri_data$hipp - fmri_data$caud)/(fmri_data$hipp + fmri_data$caud)
+```
+
+
+```{r create age and gender columns}
+merged<-merge(fmri_data,DSP, by.x="ID") #add all=T to merge all the data, even if there::here are missing IDs
+
+merged<-merged %>%
+      mutate( Gender= case_when(
+        startsWith(as.character(ID), "11") ~ "Male",
+        startsWith(as.character(ID), "12") ~ "Female",
+        startsWith(as.character(ID), "21") ~ "Male",
+        startsWith(as.character(ID), "22") ~ "Female",
+                 TRUE ~ "number"))
+
+merged<-merged %>%
+      mutate( Age= case_when(
+        startsWith(as.character(ID), "1") ~ "YA",
+        startsWith(as.character(ID), "2") ~ "OA",
+                 TRUE ~ "number"))
+
+```
+
+
+
+```{r merge the files}
+write.csv(merged, (here::here("..","data", "final_data", "dspfrmi_data_main_analysis.csv")), row.names = FALSE)
+```
+
+
+```{r preprocess success data}
+# Load data (csv's); store all files in list; combine csv's into one dataset.
+success <- list.files(path = here::here( "..","data","Raw_Data","summary_df","First_dsp"),
+                       pattern = "*.csv", 
+                       full.names = TRUE) %>% 
+                       map_df(~read_csv(.x) %>% #do the next three lines to convert mismatch column types to character
+                       mutate(across(.fns = as.character))) %>%
+                       type_convert()
+
+#count occurrences of failures and successes by participant
+setDT(success)
+success<-dcast(success, ParticipantNo ~ Status, fun.aggregate = length)
+
+success<-success %>% 
+  dplyr::rename(
+    ID = ParticipantNo,
+    )
+
+#load main data
+main<-read.csv(here::here("..", "data","final_data","dspfrmi_data_main_analysis.csv"))
+
+#merge
+merged<-merge(main,success, by.x="ID")
+
+merged <- merged[c("Place_response_index", "Failure","Success")] 
+
+merged<-cor(merged)  
+corrplot(merged,
+         type = "lower",
+         addCoef.col = "black",
+         number.cex = 1,
+         tl.cex = 1,
+         method = "square",
+         diag=FALSE
+         )
+```
+
+
+```{r plot proportions of subjecs that successfully completed trials in the DSP}
+
+p <- ggboxplot(merged, x = "age_group", y = "Success",
+          color = "gender", palette = "jco",
+          add = "jitter")+  
+  stat_compare_means(comparisons = list(c("Y","O")),label.y = c(25,32)) # Add pairwise comparisons p-value
+  #stat_compare_means(label.y = 30)     # Add global p-value
+
+p
+
+```
+
+```{r preprocessing succcess data}
+success_data <- list.files(path = here::here( "..","data","Raw_Data","Script_Output_DO_NOT_TOUCH","summary_dfs"),
+                       pattern = "*.csv", 
+                       full.names = TRUE) %>% 
+            lapply(read.csv) %>%                                                
+            bind_rows 
+
+
+setDT(success_data)
+success_count<-dcast(success_data, ParticipantNo ~ Status, fun.aggregate = length)
+success_count$success_prop<-(success_count$Success)/(success_count$Success+success_count$Failure)
+
+
+#change id column name
+success_count<-success_count %>% 
+  dplyr::rename(
+    ID = ParticipantNo,
+    )
+
+
+#save data output for rankings
+write.csv(success_count, here::here( "..","data","final_Data","success_data.csv"),
+            row.names = FALSE)
+
+write.csv(success_data, here::here( "..","data","final_Data","combined_summary_dfs.csv"),
+            row.names = FALSE)
+```
+

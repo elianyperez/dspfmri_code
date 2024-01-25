@@ -1,0 +1,142 @@
+---
+title: "dspfmri_control_task_preprocessing"
+author: "Eliany Perez"
+date: "3/29/2023"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#load packages
+library(here)
+library(jmv)
+library(ggplot2)
+library(Hmisc)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(psych)
+library(dplyr)
+library(formattable)
+library(readxl)
+
+here()
+
+
+# Load data (csv's); store all files in list; combine csv's into one dataset.
+control <- list.files(path = here("..","data","control_task"), 
+                      pattern = "*.csv", full.names = TRUE) %>% 
+  map_df(~read_csv(.x) %>% mutate(across(.fns = as.character))) %>%
+  type_convert()
+
+```
+
+
+```{r}
+control_tmp <- control[c("participant","run", "group","version", "control_video_file_1","control_video_file_2", "Control_1_resp.keys","Control_2_resp.keys")] 
+
+## remove rows with na in both response columns
+control_tmp <- control_tmp[!with(control_tmp,is.na(Control_1_resp.keys)& is.na(Control_2_resp.keys)& is.na(control_video_file_1)& is.na(control_video_file_2)),]
+
+
+## Merge video file columns into one
+control_tmp $video_file[!is.na(control_tmp $control_video_file_1)] = control_tmp $control_video_file_1[!is.na(control_tmp $control_video_file_1)]  
+control_tmp $video_file[!is.na(control_tmp $control_video_file_2)] = control_tmp $control_video_file_2[!is.na(control_tmp $control_video_file_2)]  
+
+#do the same thing with the response key columns
+control_tmp $resp_keys[!is.na(control_tmp $Control_1_resp.keys)] = control_tmp $Control_1_resp.keys[!is.na(control_tmp $Control_1_resp.keys)]  
+control_tmp $resp_keys[!is.na(control_tmp $Control_2_resp.keys)] = control_tmp $Control_2_resp.keys[!is.na(control_tmp $Control_2_resp.keys)]
+
+#create new data frame without the split video file columns
+control_tmp <- control_tmp[c("participant","run", "group","version", "video_file", "resp_keys")] 
+
+#shift the resp_keys column down so all the values line up
+control_tmp <- control_tmp %>%
+mutate(resp_keys=lag(resp_keys)) %>%
+na.omit()
+
+#add a period to merge with the answer key
+control_tmp$video_file <-paste0('.', control_tmp$video_file)
+
+
+write.csv(control_tmp, (here::here("..","data","control_task","clean_data","dspfmri_control_trialbytrial.csv")), row.names = FALSE)
+
+```
+
+```{r}
+#answers
+answers <- list.files(path = "C:/Users/12393/Dropbox (UFL)/ElianyPerez (1)/Moore/OSF/data/control_task/answer_files",
+                       pattern = "*.csv", 
+                       full.names = TRUE) %>% 
+            lapply(read.csv) %>%                
+            bind_rows 
+
+
+answers<-answers %>%
+      mutate( environment = case_when(
+        startsWith(as.character(environment), "alternate") ~ "alt",
+        startsWith(as.character(environment), "normal") ~ "nor",
+    ))
+
+answers<-answers %>% 
+  dplyr::rename(
+    group = environment
+    )
+
+```
+
+
+```{r}
+# Using dplyr when columns are same
+df2 <- control_tmp %>% inner_join( answers, 
+                              by=c("video_file","run", "group"))
+
+df2<-df2 %>%
+      mutate( resp_keys = case_when(
+        startsWith(as.character(resp_keys), "None") ~ "different",
+        startsWith(as.character(resp_keys), "b") ~ "different",
+        startsWith(as.character(resp_keys), "y") ~ "same",
+    ))
+
+df2$correct<-ifelse(df2$resp_keys == df2$same_or_different,"1","0")
+
+write.csv(df2, (here::here("..","data","control_task","clean_data","dspfmri_control_trialbytrial_wAnswers.csv")), row.names = FALSE)
+```
+
+
+```{r}
+#create percentage correct by run
+df2$correct<-as.numeric(df2$correct)
+
+df3<-df2 %>%
+    group_by(participant, run) %>% 
+    dplyr::summarise(across(starts_with('correct'), sum))
+
+df3 <- df3 %>%                                    # Calculate percentage by group
+  group_by(participant,run) %>%
+  mutate(perc = (correct / 2)*100) %>% 
+  as.data.frame()
+
+#create new data frame without the split video file columns
+df3 <- df3[c("participant","run", "perc")] 
+df3<-reshape(df3, idvar = "participant", timevar = "run", direction = "wide")
+
+df3<-df3 %>% 
+  dplyr::rename(
+    Run_1 = perc.1,
+    Run_2 = perc.2,
+    Run_3 = perc.3,
+    Run_4 = perc.4,
+    )
+
+#get a total percentage
+df3$Total <- (rowSums(df3[2:5],na.rm=TRUE)/400)*100
+
+write.csv(df3, (here::here("..","data","control_task","clean_data","dspfmri_control_run_totals.csv")), row.names = FALSE)
+   
+```
+

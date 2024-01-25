@@ -1,0 +1,82 @@
+---
+title: "dspfmri_pre-processing"
+author: "Eliany Perez"
+date: "12/28/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(here)
+here()
+```
+
+```{r Create place response index}
+#load data
+fmri_data <- read.csv(here("..", "data","fmri_data_12_28_2022.csv"))
+DSP <- read.csv(here("..", "data","final_data","dspfmri_frechet_by_trial.csv"))
+
+DSP <- DSP[c("subject","Sur", "Top", "Rte", "Rev")] 
+
+#Get row-wise minimum
+min_val <- do.call(pmin, DSP[c(2:5)])
+
+#Check if there are more than one occurrence of minimum value 
+# and if minimum value is less than 200.
+DSP$flag <- rowSums(DSP == min_val) > 1
+
+#delete all rows where the flag is True
+DSP <- DSP[DSP$flag != TRUE ,]
+
+
+#choose the minimum value and identify the corresponding strategy 
+DSP<-DSP %>% 
+  rownames_to_column('min_strategy') %>%  # creates an ID number
+  gather(strategy, cnt, Sur:Rev) %>% 
+  group_by(min_strategy) %>% 
+  slice(which.min(cnt))
+
+
+#choose just the strategy and subject columns to do a count
+DSP <- DSP[c("subject", "strategy")] 
+
+#count occurrences 
+setDT(DSP)
+DSP<-dcast(DSP, subject ~ strategy, fun.aggregate = length)
+#create a new data frame with counts of the strategies per participant 
+
+write.csv(DSP,(here("..", "data","final_data","DSP_main_analysis.csv")), row.names = FALSE)
+
+```
+
+```{r Create place response index}
+
+DSP$Place_response_index<- DSP$Sur/(DSP$Sur + DSP$Rte)
+#DSP[is.na(DSP)] <- 0
+#PRI = # of surveys Trials/ (#)
+
+DSP<-DSP %>% 
+  dplyr::rename(
+    ID = subject,
+    )
+
+```
+
+
+```{r merge the files}
+merged<-merge(fmri_data,DSP, by.x="ID")
+
+write.csv(merged, (here("..", "data","final_data","dspfrmi_data_main_analysis.csv")), row.names = FALSE)
+
+```
+
+```{r}
+DSP <- read.csv(here("..", "data","final_data","dspfrmi_data_main_analysis.csv"))
+```
+
+
+
